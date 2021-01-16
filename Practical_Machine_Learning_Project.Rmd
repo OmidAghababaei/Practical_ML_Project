@@ -1,0 +1,131 @@
+---
+author: "Omid"
+date: '`r Sys.Date()` '
+title: "Practical Machine Learning Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit,  it is now possible to collect a large amount of data about personal activities relatively inexpensively. These type of devices are part of the quantified self movement, a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The data consist of a Training data and a Test data (to be used to validate the selected model). The goal of the project is to predict the manner in which they did the exercise. This is the **classe** variable in the training set. You may use any of the other variables to predict with.
+
+## Library & Data Loading and  Processing
+We first load necessary libraries and read the training and testing data.
+```{r, results='hide'}
+options(warn = -1)
+library(caret);library(rpart);library(rpart.plot); library(corrplot)
+library(RColorBrewer); library(rattle); library(randomForest); library(gbm)
+```
+
+```{r}
+train_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train_set<- read.csv(train_url, header = T, na.strings = c("", "NA"))
+test_set <- read.csv(test_url, header = T, na.strings = c("", "NA"))
+
+dim(train_set); dim(test_set)
+```
+
+## Data Cleaning
+We also remove the variables with missing values. The resulting tarining and test data consist of 19622 and 20 cases, respectively and 60 variables. 
+```{r}
+train1<- train_set[, colSums(is.na(train_set)) == 0]
+test1 <- test_set[, colSums(is.na(test_set)) == 0]
+dim(train1); dim(test1)
+```
+Additionally, we exclude the first 7 variables, as they do not have much impact on the outcome. That is we consider 53 variables. 
+```{r}
+train <- train1[, -c(1:7)]
+test <- test1[, -c(1:7)]
+dim(train); dim(test)
+```
+
+### Data Splitting
+We now divide the (training) data into 70%  training set and 30%  testing set. 
+We will use the  Note that later we will use the resulting prediction model on the 20 cases of the testing data. 
+```{r,results='hide'}
+set.seed(1234) 
+inTrain <- createDataPartition(train$classe, p = 0.7, list = FALSE)
+trainSet<- train[inTrain, ]
+testSet <- train[-inTrain, ]
+dim(trainSet); dim(testSet)
+```
+
+## Correlation Cutoff
+We also obtain for highly correlated variables with a cut off equal to 0.75 as follows. 
+```{r}
+corMat <- cor(trainSet[, -53])
+highlyCorr = findCorrelation(corMat, cutoff=0.75)
+names(trainSet)[highlyCorr]
+```
+
+## Model Building
+We  use the following algorithms  to predict the outcome.
+* Classification trees
+* Random forests
+* Generalized Boosted Model
+
+#### Prediction with Classification Trees
+We first fit the model, and then we create the classification tree. 
+```{r}
+set.seed(12345)
+DecTreeMod <- rpart(classe ~ ., data=trainSet, method="class")
+fancyRpartPlot(DecTreeMod)
+```
+
+We then validate the model  using the testSet and assess its performance. 
+```{r}
+PredTreeMod <- predict(DecTreeMod, testSet, type = "class")
+cmtree <- confusionMatrix(PredTreeMod, testSet$classe)
+cmtree
+```
+We see that the accuracy rate of the model is 0.75; that is the the out of sample error is almost 0.25 which is significant. 
+
+### Prediction with Random Forest
+For this algorithm, we first fit the model while using cross-validation for resampling. 
+```{r}
+RFcontrol <- trainControl(method="cv", number=3, verboseIter=FALSE)
+RFMod <- train(classe ~ ., data=trainSet, method="rf", trControl=RFcontrol)
+RFMod$finalModel
+```
+We then validate the model using the test set to find out how well it performs by looking at its accuracy. 
+```{r}
+PredRF <- predict(RFMod, newdata=testSet)
+RFcm <- confusionMatrix(PredRF, testSet$classe)
+RFcm
+```
+The accuracy rate using random forest is 0.995; That is the out of sample error is 0.005. Note that this might be due to overfitting.
+
+### Prediction with Generalized Boosted  Model (GBM)
+Finally, we use  GBM and 5-fold cross-validation for resampling. 
+```{r}
+set.seed(12345)
+GBMcontrol <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+GBMmod  <- train(classe ~ ., data=trainSet, method = "gbm", trControl = GBMcontrol, verbose = FALSE)
+GBMmod$finalModel
+
+print(GBMmod)
+```
+Similarly, we validate and assess the perfomance of the GBM model.  
+```{r}
+PredGBM <- predict(GBMmod, newdata=testSet)
+GBMcm <- confusionMatrix(PredGBM, testSet$classe)
+GBMcm
+```
+The accuracy rate using   random forest is 0.97 which means the out of sample error is 0.03.
+
+### Select the Best Model
+Comparing the  out of sample error of the three models, we select the Random Forest model for prediction of 20 cases of the testing data. 
+```{r}
+FinalPred <- predict(RFMod, newdata=test)
+FinalPred
+```
+
